@@ -1,0 +1,75 @@
+name: Build JingJian APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Extract Android source archive
+        run: unzip -q 'jingjian-android-1.0.0-source(1).zip' -d source
+
+      - name: Align Java and Kotlin JVM targets
+        working-directory: source/jingjian
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("app/build.gradle.kts")
+          s = p.read_text()
+          marker = "android {"
+          if marker not in s:
+              raise SystemExit("Could not find android block in app/build.gradle.kts")
+          if "targetCompatibility = JavaVersion.VERSION_17" not in s:
+              s = s.replace(marker, marker + """
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          """, 1)
+          p.write_text(s)
+          print("Java source/target compatibility set to 17")
+          PY
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Generate Gradle Wrapper
+        working-directory: source/jingjian
+        run: gradle wrapper --gradle-version 8.9
+
+      - name: Build Debug APK
+        working-directory: source/jingjian
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jingjian-1.0.0-debug
+          path: source/jingjian/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
