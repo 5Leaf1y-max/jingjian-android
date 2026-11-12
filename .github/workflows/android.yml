@@ -35,9 +35,9 @@ jobs:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
-          test -n "$SIGNING_KEYSTORE_BASE64" || { echo "Missing SIGNING_KEYSTORE_BASE64 repository secret"; exit 1; }
-          test -n "$SIGNING_STORE_PASSWORD" || { echo "Missing SIGNING_STORE_PASSWORD repository secret"; exit 1; }
-          test -n "$SIGNING_KEY_PASSWORD" || { echo "Missing SIGNING_KEY_PASSWORD repository secret"; exit 1; }
+          test -n "$SIGNING_KEYSTORE_BASE64" || { echo "Missing SIGNING_KEYSTORE_BASE64"; exit 1; }
+          test -n "$SIGNING_STORE_PASSWORD" || { echo "Missing SIGNING_STORE_PASSWORD"; exit 1; }
+          test -n "$SIGNING_KEY_PASSWORD" || { echo "Missing SIGNING_KEY_PASSWORD"; exit 1; }
           mkdir -p "$RUNNER_TEMP/jingjian-signing"
           printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/jingjian-signing/release.jks"
           test -s "$RUNNER_TEMP/jingjian-signing/release.jks"
@@ -56,23 +56,27 @@ jobs:
       - name: Extract Android source archive
         run: unzip -q 'jingjian-android-1.3.2-source.zip' -d source
 
-      - name: Repair embedded System Helper quotes
+      - name: Repair Kotlin description string
         working-directory: source/jingjian
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p = Path("app/src/main/java/com/akiyo/cleanguard/MainActivity.kt")
-          s = p.read_text(encoding="utf-8")
-          target = '"System Helper"'
-          count = s.count(target)
-          if count == 0:
-              print("Expected phrase not found; source line 381 follows:")
-              lines = s.splitlines()
-              print(repr(lines[380]) if len(lines) >= 381 else "source shorter than expected")
-              raise SystemExit("No safe automatic replacement was possible.")
-          s = s.replace(target, "System Helper")
-          p.write_text(s, encoding="utf-8")
-          print(f"Repaired {count} embedded quote pair(s).")
+          lines = p.read_text(encoding="utf-8").splitlines()
+          found = [i for i, line in enumerate(lines) if 'Text("System Helper' in line]
+          if len(found) != 1:
+              raise SystemExit(f"Expected one System Helper Text line, found {len(found)}")
+          i = found[0]
+          line = lines[i]
+          first, last = line.find('"'), line.rfind('"')
+          if first < 0 or last <= first:
+              raise SystemExit(f"Cannot identify string boundaries on line {i+1}")
+          body = line[first + 1:last]
+          body = re.sub(r'(?<!\\)"', r'\\"', body)
+          lines[i] = line[:first + 1] + body + line[last:]
+          p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print(f"Escaped embedded quotes on line {i+1}.")
           PY
 
       - name: Set up Gradle 8.9
